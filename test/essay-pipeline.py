@@ -110,12 +110,37 @@ def model_payload():
             "recommendation": "Переписать третий абзац."}
 
 
+def oge_model_payload():
+    """Ответ модели по рубрике ОГЭ: только содержание И1–И3, те же поля, что
+    у ЕГЭ (id/name/score/max_score) — именно этого требовал фикс схемы."""
+    criteria = []
+    for cid, name, mx in (("I1", "Содержание и аргументация", 3),
+                          ("I2", "Пояснения к аргументам", 3),
+                          ("I3", "Композиция и логичность речи", 3)):
+        criteria.append({"id": cid, "name": name,
+                         "score": 3 if cid == "I3" else 2,
+                         "max_score": mx, "comment": f"Комментарий к {cid}."})
+    return {"total_score": 999, "max_score": 999,
+            "short_verdict": "Ответ на вопрос есть, добавь пояснение ко второму аргументу.",
+            "criteria": criteria,
+            "what_to_improve": ["Покажи, что доказывает второй аргумент"],
+            "recommendation": "После каждого аргумента добавь пояснение-связку."}
+
+
+def judge_reply(messages, **kwargs):
+    """Заглушка судьи, различающая рубрику по системному промпту."""
+    system = str((messages[0] or {}).get("content") or "")
+    if "И1" in system and "ОГЭ" in system:
+        return json.dumps(oge_model_payload(), ensure_ascii=False)
+    return json.dumps(model_payload(), ensure_ascii=False)
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="ege-essay-pipe-") as tmp:
         server = load_server(Path(tmp) / "ege.sqlite3")
         ai = server._AI
         assert ai is not None, "AI module not loaded"
-        ai.chat = lambda messages, **kw: json.dumps(model_payload(), ensure_ascii=False)
+        ai.chat = judge_reply
         ai.lt_check = lambda text: []
         os.environ["AI_API_KEY"] = "sk-test-pipeline-key"
 
@@ -433,6 +458,79 @@ def main():
             check("forged submission stays submitted (no result)",
                   status == 200 and (got5.get("submission") or {}).get("status") == "submitted"
                   and (got5.get("submission") or {}).get("result") is None, str(got5)[:160])
+
+            # 10. ОГЭ (задание 13): та же система, другая рубрика — 7 критериев
+            # и 21 балл. Раньше путь обрывался на записи оценки: хранилище
+            # жёстко требовало 10 критериев и 22 балла, поэтому корректная
+            # ОГЭ-проверка не сохранялась вовсе. Проверяем до экрана результата.
+            ai.chat = judge_reply
+            ai.reset_ai_rate()
+            status, _ = request(opener, base, "/api/subject", "POST", {"subject": "oge_russian"})
+            check("OGE SUBJECT switch", status == 200, str(status))
+            oge_text = essay_text(90, "огэ")
+            status, sub_oge = request(opener, base, "/api/essays", "POST", {
+                "subject": "oge_russian", "taskId": "oge_re13_1", "skill": "or13_essay",
+                "text": oge_text, "id": "pipe-oge-1"})
+            check("OGE SUBMIT ok, status submitted",
+                  status == 200 and sub_oge.get("evaluationStatus") == "submitted",
+                  str(sub_oge)[:200])
+            check("OGE minWords = 70", int(sub_oge.get("minWords") or 0) == 70,
+                  str(sub_oge.get("minWords")))
+            oge_cid = sub_oge.get("clientId")
+            status, ai_oge = request(opener, base, "/api/ai/essay", "POST", {
+                "subject": "oge_russian", "text": oge_text, "taskId": "oge_re13_1"})
+            oge_res = ai_oge.get("result") or {}
+            oge_ids = [c.get("id") for c in oge_res.get("criteria") or []]
+            check("OGE AI 200: 7 критериев и максимум 21",
+                  status == 200 and len(oge_ids) == 7 and oge_res.get("max_score") == 21,
+                  f"{status} {oge_ids} {oge_res.get('max_score')}")
+            check("OGE критерии И1–И3 + ГК1–ГК4",
+                  oge_ids == ["I1", "I2", "I3", "GK1", "GK2", "GK3", "GK4"], str(oge_ids))
+            status, saved_oge = request(opener, base, "/api/essays/evaluation", "POST", {
+                "subject": "oge_russian", "clientId": oge_cid, "status": "ready"})
+            check("OGE evaluation ready (rubric-aware validation)",
+                  status == 200
+                  and (saved_oge.get("submission") or {}).get("status") == "ready",
+                  f"{status} {str(saved_oge)[:200]}")
+            status, got_oge = request(opener, base,
+                                      "/api/essays?subject=oge_russian&clientId=" + oge_cid)
+            view_oge = (got_oge.get("submission") or {}).get("view") or {}
+            view_ids = [c.get("id") for c in view_oge.get("criteria") or []]
+            check("OGE view: максимум 21 и все 7 критериев",
+                  status == 200 and view_oge.get("max_score") == 21 and len(view_ids) == 7,
+                  f"{view_oge.get('max_score')} {view_ids}")
+            check("OGE view: порог объёма 70 слов",
+                  int(view_oge.get("word_norm_min") or 0) == 70,
+                  str(view_oge.get("word_norm_min")))
+            check("OGE view: группы «содержание» и «грамотность»",
+                  [g.get("id") for g in view_oge.get("groups") or []] == ["content", "literacy"],
+                  str([g.get("id") for g in view_oge.get("groups") or []]))
+            check("OGE view: арифметика сходится",
+                  sum(int(c.get("score") or 0) for c in view_oge.get("criteria") or [])
+                  == view_oge.get("total_score"),
+                  str(view_oge.get("total_score")))
+            check("OGE view: итог 19 (7 содержания + 12 грамотности)",
+                  view_oge.get("total_score") == 19,
+                  str(view_oge.get("total_score")))
+
+            # 11. Шкала XP общая и егэшная (0–22): работа, идеальная по меркам
+            # ОГЭ (19 из 21), не должна оплачиваться как 19 из 22 — иначе
+            # рубрика ОГЭ систематически недоплачивает.
+            conn2 = server.connect()
+            try:
+                row = conn2.execute(
+                    "SELECT user_id FROM essay_submissions"
+                    " WHERE subject='oge_russian' AND evaluation_status='ready'"
+                    " ORDER BY id DESC LIMIT 1").fetchone()
+                uid = int(row["user_id"]) if row else 0
+                oge_scores = server.essay_ready_scores(conn2, uid, "oge_russian") if uid else {}
+            finally:
+                conn2.close()
+            check("OGE ready score приведён к 22-балльной шкале XP",
+                  oge_scores.get("oge_re13_1") == 20, str(oge_scores))
+            check("OGE XP за идеальную работу равен егэшному",
+                  server.essay_xp(oge_scores.get("oge_re13_1") or 0) == server.essay_xp(20),
+                  str(server.essay_xp(oge_scores.get("oge_re13_1") or 0)))
         finally:
             httpd.shutdown()
             httpd.server_close()

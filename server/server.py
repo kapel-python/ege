@@ -6461,6 +6461,13 @@ def _ai_check_with_retry(format_id: str, text, *, user_id: int, ip: str, **kwarg
             # оборванные refresh-ем потоки). Отдаём сразу, клиент дешёво
             # дождётся исходного прохода через evaluation.
             raise
+        except _AI.AIRefusalError:
+            # Отказ по политике провайдера (anti-jailbreak): тот же текст —
+            # тот же отказ. Повтор стоит денег и секунд, а шанс нулевой;
+            # провайдер при этом жив, поэтому failover внутри chat его и не
+            # трогает. Ученик получает честное «фильтр отклонил запрос» и
+            # нетронутый жетон (см. ветку AIRefusalError в эндпоинте).
+            raise
         except (_AI.AIFormatError, _AI.AIError) as exc:
             failure = exc
             if attempt >= attempts or time.monotonic() - started >= _AI.AI_RETRY_BUDGET_SEC:
@@ -6472,7 +6479,27 @@ def _ai_check_with_retry(format_id: str, text, *, user_id: int, ip: str, **kwarg
     raise failure  # noqa: B904 — повторяем ровно то, что поймали
 
 
-def _validated_essay_result(result) -> dict:
+def _essay_result_rubric(criteria: list) -> str | None:
+    """Рубрика отчёта по составу критериев: "ege" (K1–K10) или "oge" (И1–И3 + ГК1–ГК4).
+
+    Схему определяем по самим критериям, а не по предмету: отчёт — это данные,
+    которые могли быть записаны раньше (код эволюционирует, записи остаются), и
+    доверять внешнему «subject» тут нечему. Смесь рубрик не проходит ни одну
+    форму — вернётся None и отчёт будет отвергнут.
+    """
+    if _AI is None:
+        return None
+    ids = [str(item.get("id")) for item in criteria if isinstance(item, dict)]
+    if len(ids) != len(criteria) or len(set(ids)) != len(ids):
+        return None
+    for rubric in _AI.ESSAY_RUBRICS:
+        official = {cid for cid, _n, _m in _AI.essay_criteria_for(rubric)}
+        if set(ids) == official:
+            return rubric
+    return None
+
+
+def _validated_essay_result(result, rubric: str | None = None) -> dict:
     """Проверить форму отчёта о проверке и вернуть его с пересчитанным итогом.
 
     Итог и максимум — всегда пересчёт из самих критериев: доверять числу,
@@ -6480,12 +6507,22 @@ def _validated_essay_result(result) -> dict:
     а записи остаются). Ответ /api/ai/essay отдаёт total, равный сумме баллов
     (после вето грамотности обнуляется вместе с итогом), поэтому на честном
     пути пересчёт совпадает с записанным.
+
+    Рубрика не одна: ЕГЭ — 10 критериев и 22 балла, ОГЭ — 7 критериев и 21.
+    Форму определяем по составу критериев; `rubric` (если передан) лишь
+    подтверждает её — несовпадение это порча записи, а не повод угадывать.
     """
     if not isinstance(result, dict):
         raise ValueError("result must be an object")
     criteria = result.get("criteria")
-    if not isinstance(criteria, list) or len(criteria) != 10:
-        raise ValueError("result must carry 10 criteria")
+    if not isinstance(criteria, list) or not criteria:
+        raise ValueError("result must carry criteria")
+    shape = _essay_result_rubric(criteria)
+    if shape is None:
+        raise ValueError("result criteria are not a known rubric")
+    if rubric is not None and str(rubric) != shape:
+        raise ValueError("result criteria of another rubric")
+    registry = {cid: mx for cid, _n, mx in _AI.essay_criteria_for(shape)}
     for item in criteria:
         if not isinstance(item, dict) or not item.get("id") or not str(item.get("comment") or "").strip():
             raise ValueError("result criteria are malformed")
@@ -6493,11 +6530,13 @@ def _validated_essay_result(result) -> dict:
             s, m = int(item.get("score")), int(item.get("max_score"))
         except (TypeError, ValueError):
             raise ValueError("result criteria are malformed")
+        if m != registry.get(str(item["id"])):
+            raise ValueError("result criteria are malformed")
         if s < 0 or s > m:
             raise ValueError("result criteria are malformed")
     total = sum(int(item["score"]) for item in criteria)
     maximum = sum(int(item["max_score"]) for item in criteria)
-    if maximum != 22 or not 0 <= total <= 22:
+    if maximum != _AI.essay_max_score_for(shape) or not 0 <= total <= maximum:
         raise ValueError("result scores out of range")
     if total != int(result.get("total_score") or 0) or maximum != int(result.get("max_score") or 0):
         result = {**result, "total_score": total, "max_score": maximum}
@@ -6728,7 +6767,8 @@ def save_essay_evaluation(conn: sqlite3.Connection, user_id: int, subject: str, 
         check = load_essay_check(conn, user_id, subject, row["text"], task_id=row["task_id"])
         if check is None:
             raise EssayNotChecked()
-        result = _validated_essay_result(check["result"])
+        result = _validated_essay_result(check["result"],
+                                        essay_rubric_for_subject(subject))
         blob = json.dumps(result, ensure_ascii=False)
         # evaluation_version — версия ПРАВИЛ, по которым получен результат, а не
         # счётчик переоценок: раньше здесь стояла константа 1 у всех строк, и по
@@ -12096,7 +12136,11 @@ ESSAY_XP_MAX = 500
 
 
 def essay_xp(score) -> int:
-    """XP за проверенное сочинение по баллу 0–22. Монотонно, всегда >= 100."""
+    """XP за проверенное сочинение по баллу 0–22. Монотонно, всегда >= 100.
+
+    Балл приходит уже приведённым к 22-балльной шкале: `essay_ready_scores`
+    нормирует ОГЭ (21 балл) к ней, поэтому шкала XP одна для обеих осей.
+    """
     try:
         value = float(score)
     except (TypeError, ValueError):
@@ -12119,6 +12163,7 @@ def essay_ready_scores(conn: sqlite3.Connection, user_id: int, subject: str) -> 
     консоли нельзя. Берём максимум по заданию: переписанное хуже сочинение
     не роняет уже заработанный XP. Засчитывается один раз (см. solved_once
     в derive_stats: повтор того же задания платит только минимум попытки).
+    Балл ОГЭ (максимум 21) приводится здесь к общей 22-балльной шкале XP.
     """
     try:
         ensure_essay_schema(conn)
@@ -12136,8 +12181,18 @@ def essay_ready_scores(conn: sqlite3.Connection, user_id: int, subject: str) -> 
             total = int(result.get("total_score"))
         except (TypeError, ValueError, AttributeError):
             continue
-        if not 0 <= total <= ESSAY_SCORE_MAX:
+        try:
+            top = int(result.get("max_score") or ESSAY_SCORE_MAX)
+        except (TypeError, ValueError):
+            top = ESSAY_SCORE_MAX
+        if top <= 0 or not 0 <= total <= top:
             continue
+        # Шкала XP общая и егэшная (0–22), а работа ОГЭ стоит 21 балл:
+        # приводим балл к ней. Иначе идеальная работа ОГЭ (И1–И3 + ГК1–ГК4)
+        # оплачивалась бы как 21 из 22 — систематический недобор за рубрику,
+        # которую ученик не выбирал.
+        if top != ESSAY_SCORE_MAX:
+            total = int(total * ESSAY_SCORE_MAX / top + 0.5)
         task_id = row["task_id"]
         if not isinstance(task_id, str) or not task_id:
             continue
@@ -18356,6 +18411,18 @@ class Handler(BaseHTTPRequestHandler):
                     except _AI.AIUnavailable as exc:
                         rid = log_request_error("ai-unavailable", exc)
                         self.send_json({"error": "Сервис проверки временно недоступен. Попробуй снова чуть позже.", "ref": rid}, 503, token=token)
+                        return
+                    except _AI.AIRefusalError as exc:
+                        # Шлюз отклонил сам запрос по своей политике
+                        # (anti-jailbreak 400). Это не сбой и не вина ученика:
+                        # повторить тот же текст бессмысленно, а «попробуй ещё
+                        # раз» без объяснения — обман. Поэтому отдельный код и
+                        # честный текст; жетон возвращает finally (usage_spent
+                        # не взведён), submission в failed НЕ помечаем — ученик
+                        # может переписать работу и проверить её снова.
+                        rid = log_request_error("ai-refusal", exc)
+                        self.send_json({"error": "Проверку отклонил фильтр провайдера ИИ: в работе есть формулировки, которые он не пропускает. Жетон не списан — измени спорные фразы и отправь снова.",
+                                        "code": "AI_REFUSED", "ref": rid}, 503, token=token)
                         return
                     except _AI.AIError as exc:
                         rid = log_request_error("ai-upstream", exc)

@@ -6246,6 +6246,16 @@ function essayWordsLabel(n) {
   return "слов";
 }
 
+/* Порог объёма зависит от рубрики, и задаёт его сервер по предмету
+   (essay_min_words_for: ЕГЭ — 150 слов, ОГЭ — 70). Клиент выводит его из
+   текущего предмета, а не из одной константы: иначе на ОГЭ счётчик требовал
+   150 слов, полоса объёма не доходила до конца, а кнопка «Отправить»
+   оставалась заблокированной на совершенно нормальной работе. */
+function essayMinWordsNeed() {
+  const subject = String((typeof Store !== "undefined" && Store.subject) || essaySubject() || "");
+  return subject.startsWith("oge_") ? 70 : ESSAY_MIN_WORDS;
+}
+
 /* Исходный текст для сочинения: отдельный блок сверху темы.
    Поле source сегодня — короткая provenance-подпись («Демоверсия…»),
    поэтому как связный отрывок воспринимаем только длинный текст:
@@ -6401,8 +6411,9 @@ function sessionEssayWire(t) {
   const update = () => {
     S.essayDraftByTask[t.id] = input.value;
     const n = countWords(input.value);
-    if (n < ESSAY_MIN_WORDS) {
-      countEl.textContent = `${n} / ${ESSAY_MIN_WORDS} ${essayWordsLabel(ESSAY_MIN_WORDS)} · ещё ${ESSAY_MIN_WORDS - n}`;
+    const need = essayMinWordsNeed();
+    if (n < need) {
+      countEl.textContent = `${n} / ${need} ${essayWordsLabel(need)} · ещё ${need - n}`;
       countEl.classList.remove("essay-editor__count--ok");
       editor.classList.remove("essay-editor--ready");
       btn.disabled = true;
@@ -6412,7 +6423,7 @@ function sessionEssayWire(t) {
       editor.classList.add("essay-editor--ready");
       btn.disabled = false;
     }
-    barEl.style.width = `${Math.min(100, (n / ESSAY_MIN_WORDS) * 100)}%`;
+    barEl.style.width = `${Math.min(100, (n / need) * 100)}%`;
     // Правка после неудачной проверки возвращает кнопку отправки: текст
     // уже не тот, что сохранён, — это новая работа (см. essaySyncSubmitVisibility).
     essaySyncSubmitVisibility(t);
@@ -6951,13 +6962,14 @@ async function essayRestoreReady(t) {
             Session.cur.essayDraftByTask[t.id] = sub.text;
           }
           const n = countWords(sub.text);
+          const need = essayMinWordsNeed();
           const countEl = document.getElementById("essayCount");
           const barEl = document.getElementById("essayBar");
           const btn = document.getElementById("essaySubmitBtn");
           const editor = document.getElementById("essayEditor");
           if (countEl) {
-            if (n < ESSAY_MIN_WORDS) {
-              countEl.textContent = `${n} / ${ESSAY_MIN_WORDS} ${essayWordsLabel(ESSAY_MIN_WORDS)} · ещё ${ESSAY_MIN_WORDS - n}`;
+            if (n < need) {
+              countEl.textContent = `${n} / ${need} ${essayWordsLabel(need)} · ещё ${need - n}`;
               countEl.classList.remove("essay-editor__count--ok");
               if (editor) editor.classList.remove("essay-editor--ready");
               if (btn) btn.disabled = true;
@@ -6968,7 +6980,7 @@ async function essayRestoreReady(t) {
               if (btn && !input.disabled) btn.disabled = false;
             }
           }
-          if (barEl) barEl.style.width = `${Math.min(100, (n / ESSAY_MIN_WORDS) * 100)}%`;
+          if (barEl) barEl.style.width = `${Math.min(100, (n / need) * 100)}%`;
         }
       } catch (_) {}
       // Прерванная перезагрузкой проверка (живой свежий замер ИЛИ свежее
@@ -7797,7 +7809,13 @@ function essayFinishReady(t, submission, text, wordCount, seconds) {
   // в recordAnswer, где он конвертируется в XP по шкале essayXp. Повтор того
   // же задания сверх защиты alreadyMastered ничего не доплачивает.
   const closesTaskId = S.errorMap ? S.errorMap[t.id] : undefined;
-  const essayScore = submission && submission.result ? Number(submission.result.total_score) : NaN;
+  // Шкала XP общая и егэшная (0–22), а работа ОГЭ стоит 21 балл: приводим
+  // балл к общей шкале (зеркало essay_ready_scores на сервере), иначе
+  // идеальная работа ОГЭ оплачивалась бы ниже егэшной.
+  const rawScore = submission && submission.result ? Number(submission.result.total_score) : NaN;
+  const rawMax = submission && submission.result ? Number(submission.result.max_score) : NaN;
+  const essayScore = Number.isFinite(rawScore) && Number.isFinite(rawMax) && rawMax > 0 && rawMax !== 22
+    ? Math.round(rawScore * 22 / rawMax) : rawScore;
   const xp = recordAnswer(t, true, 0, seconds, closesTaskId, 0, essayScore);
   S.gainedXp += xp;
   S.attemptXpSum = (S.attemptXpSum || 0) + (Store._lastXpBreakdown ? Store._lastXpBreakdown.attempt : 0);
@@ -7899,7 +7917,7 @@ async function sessionEssaySubmit() {
   const t = Session.task();
   const input = document.getElementById("essayInput");
   const text = ((input && input.value) || "").trim();
-  if (countWords(text) < ESSAY_MIN_WORDS) return;
+  if (countWords(text) < essayMinWordsNeed()) return;
   essayCheckInflight = true;
   // Клик по «Отправить» сразу убирает всё с экрана: единый loading сайта
   // на весь экран (шапка, лоадер по центру, футер) — ровно как при загрузке
@@ -10589,7 +10607,7 @@ async function statsEssayFill() {
   const avg = ready.length
     ? ready.reduce((a, it) => a + Number(it.totalScore), 0) / ready.length
     : null;
-  box.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><div style="font-weight:650">Сочинения</div><div class="stat-label">${ready.length ? `проверено: ${ready.length} · средний балл ${avg.toFixed(1)} из 22` : "пока ни одного проверенного — напиши первое"}</div></div><button class="btn btn--soft btn--sm" type="button" onclick="go('essays')">Мои сочинения</button></div>`;
+  box.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><div style="font-weight:650">Сочинения</div><div class="stat-label">${ready.length ? `проверено: ${ready.length} · средний балл ${avg.toFixed(1)} из ${essayMaxScore(snap)}` : "пока ни одного проверенного — напиши первое"}</div></div><button class="btn btn--soft btn--sm" type="button" onclick="go('essays')">Мои сочинения</button></div>`;
 }
 
 function last14Days() {
@@ -10719,11 +10737,30 @@ function essayReadyItems(snap) {
   return (snap.items || []).filter((it) => it && it.status === "ready" && Number.isFinite(Number(it.totalScore)));
 }
 
-function essayScoreBand(score) {
+/* Максимум шкалы сочинений: 22 у ЕГЭ (К1–К10), 21 у ОГЭ (И1–И3 + ГК1–ГК4).
+   Рубрику выбирает сервер по предмету, поэтому число берём из самих данных
+   проверки (maxScore в элементе истории), а не из константы: вшитые «из 22»
+   на ОГЭ-предмете показывали бы несуществующий потолок. */
+function essayMaxScore(snap, fallback) {
+  const items = (snap && snap.items) || [];
+  for (const it of items) {
+    const value = Number(it && it.maxScore);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  const subject = String((snap && snap.subject)
+    || (typeof Store !== "undefined" && Store.subject) || essaySubject() || "");
+  if (subject.startsWith("oge_")) return 21;
+  return fallback || 22;
+}
+
+/* Полоса результата считается долей от максимума рубрики: 22 из 22 и 21 из 21
+   должны попадать в одну полосу, иначе ОГЭ «недотягивал» на глаз. */
+function essayScoreBand(score, max) {
   const v = Number(score);
+  const top = Number(max) > 0 ? Number(max) : 22;
   if (!Number.isFinite(v)) return "none";
-  if (v >= 17) return "good";
-  if (v >= 10) return "mid";
+  if (v >= top * 0.75) return "good";
+  if (v >= top * 0.45) return "mid";
   return "low";
 }
 
@@ -10990,6 +11027,7 @@ function essaysBodyHTML(snap) {
       </div>`;
   }
   const ready = essayReadyItems(snap);
+  const maxScore = essayMaxScore(snap);
   const scores = ready.map((it) => Number(it.totalScore));
   const avg = essayAvg1(scores);
   const best = scores.length ? Math.max(...scores) : null;
@@ -10999,7 +11037,7 @@ function essaysBodyHTML(snap) {
       <div class="card"><div class="stat-num mono">${snap.total}</div><div class="stat-label">написано</div></div>
       <div class="card"><div class="stat-num mono">${ready.length}</div><div class="stat-label">проверено</div></div>
       <div class="card"><div class="stat-num mono">${avg != null ? avg : "—"}</div><div class="stat-label">средний балл</div></div>
-      <div class="card"><div class="stat-num mono">${best != null ? `${best} / 22` : "—"}</div><div class="stat-label">лучший результат</div></div>
+      <div class="card"><div class="stat-num mono">${best != null ? `${best} / ${maxScore}` : "—"}</div><div class="stat-label">лучший результат</div></div>
     </div>`;
   const dynamics = `
     <div class="card chart-box" style="margin-top:16px">
@@ -11007,12 +11045,12 @@ function essaysBodyHTML(snap) {
         <div style="font-weight:650">Динамика баллов</div>
         ${essayDeltaChip(ready)}
       </div>
-      ${essayDynamicsSVG(ready)}
-      <div class="chart-legend"><span><i style="background:var(--accent)"></i>итог проверки · шкала 0–22</span></div>
+      ${essayDynamicsSVG(ready, maxScore)}
+      <div class="chart-legend"><span><i style="background:var(--accent)"></i>итог проверки · шкала 0–${maxScore}</span></div>
     </div>`;
   const criteria = essayCriteriaHTML(ready);
   const insight = essayInsightHTML(snap, ready);
-  const items = snap.items.map((it, i) => essayItemHTML(it, snap.total - i)).join("");
+  const items = snap.items.map((it, i) => essayItemHTML(it, snap.total - i, maxScore)).join("");
   const tail = snap.total > snap.items.length
     ? `<div class="stat-label" style="margin-top:12px;text-align:center">Показаны последние ${snap.items.length} из ${snap.total} — старые работы уже в архиве.</div>`
     : "";
@@ -11120,24 +11158,27 @@ function essayTickIndices(n) {
   return [...new Set(out)];
 }
 
-/* Прямая-линия динамики: шкала фиксирована 0–22, чтобы рост было видно
-   честно (без растягивания мелочей). Шаг по горизонтали — по порядку
-   работ, а не по времени (иначе две работы за вечер слиплись бы в одну
-   точку); время читается по подписям под осью и в подсказках точек. */
-function essayDynamicsSVG(readyNewFirst) {
+/* Прямая-линия динамики: шкала фиксирована 0–максимум рубрики (22 у ЕГЭ,
+   21 у ОГЭ), чтобы рост было видно честно (без растягивания мелочей).
+   Шаг по горизонтали — по порядку работ, а не по времени (иначе две работы
+   за вечер слиплись бы в одну точку); время читается по подписям под осью
+   и в подсказках точек. */
+function essayDynamicsSVG(readyNewFirst, maxScore) {
   const ready = readyNewFirst.slice().reverse();
   if (ready.length < 2) {
     return `<div class="empty" style="min-height:130px;display:grid;place-items:center;text-align:center">График оживёт со второй проверенной работой: одна точка — это пока факт, а не динамика.</div>`;
   }
+  const top = Number(maxScore) > 0 ? Number(maxScore) : 22;
   const times = ready.map((it) => Number(it.createdAt));
   const { mode, needYear } = essayTimeMode(times);
   const W = 560, H = 236, padL = 46, padR = 18, padT = 42, padB = 52;
   const X = (i) => padL + (ready.length === 1 ? 0.5 : i / (ready.length - 1)) * (W - padL - padR);
-  const Y = (v) => padT + (1 - Math.max(0, Math.min(22, v)) / 22) * (H - padT - padB);
+  const Y = (v) => padT + (1 - Math.max(0, Math.min(top, v)) / top) * (H - padT - padB);
   const baseY = H - padB;
   const line = ready.map((it, i) => `${i === 0 ? "M" : "L"}${X(i).toFixed(1)},${Y(Number(it.totalScore)).toFixed(1)}`).join(" ");
   const area = `${line} L${X(ready.length - 1).toFixed(1)},${baseY.toFixed(1)} L${X(0).toFixed(1)},${baseY.toFixed(1)} Z`;
-  const grid = [0, 11, 22].map((g) => `
+  const mid = Math.round(top / 2);
+  const grid = [0, mid, top].map((g) => `
     <line x1="${padL}" y1="${Y(g).toFixed(1)}" x2="${W - padR}" y2="${Y(g).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
     <text x="${padL - 8}" y="${(Y(g) + 5.5).toFixed(1)}" font-size="16" fill="var(--muted)" text-anchor="end" class="mono">${g}</text>`).join("");
   // Соседние точки в одну минуту/день/месяц давали бы две одинаковые
@@ -11153,14 +11194,14 @@ function essayDynamicsSVG(readyNewFirst) {
   const dots = ready.map((it, i) => {
     const v = Number(it.totalScore);
     const when = essayFullDateTime(times[i]);
-    const tip = `${when ? when + " — " : ""}${v} из 22`;
+    const tip = `${when ? when + " — " : ""}${v} из ${top}`;
     const lastPt = i === ready.length - 1;
     return `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="${lastPt ? 6 : 4}" fill="${lastPt ? "var(--accent)" : "var(--surface, #fff)"}" stroke="var(--accent)" stroke-width="2.5"><title>${esc(tip)}</title></circle>`;
   }).join("");
   const first = ready[0], last = ready[ready.length - 1];
   const ends = `
     <text x="${X(0).toFixed(1)}" y="${(Y(Number(first.totalScore)) - 10).toFixed(1)}" font-size="16" fill="var(--muted)" text-anchor="start" class="mono" paint-order="stroke" stroke="var(--surface, #fff)" stroke-width="3">${Number(first.totalScore)}</text>
-    <text x="${X(ready.length - 1).toFixed(1)}" y="${(Y(Number(last.totalScore)) - 10).toFixed(1)}" font-size="18" font-weight="700" fill="var(--accent-ink, var(--accent))" text-anchor="end" class="mono" paint-order="stroke" stroke="var(--surface, #fff)" stroke-width="3">${Number(last.totalScore)} / 22</text>`;
+    <text x="${X(ready.length - 1).toFixed(1)}" y="${(Y(Number(last.totalScore)) - 10).toFixed(1)}" font-size="18" font-weight="700" fill="var(--accent-ink, var(--accent))" text-anchor="end" class="mono" paint-order="stroke" stroke="var(--surface, #fff)" stroke-width="3">${Number(last.totalScore)} / ${top}</text>`;
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Динамика баллов за сочинения">
     <defs><linearGradient id="essayDyn" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="rgba(2,119,182,0.25)"/><stop offset="1" stop-color="rgba(2,119,182,0)"/>
@@ -11186,7 +11227,7 @@ function essayCriteriaHTML(ready) {
     }
   }
   if (!sums.size) return "";
-  const order = [...sums.keys()].sort();
+  const order = [...sums.keys()].sort((a, b) => essayCritOrderIndex(a) - essayCritOrderIndex(b));
   const rows = order.map((id) => {
     const cur = sums.get(id);
     const avg = cur.sum / cur.n;
@@ -11224,8 +11265,24 @@ const ESSAY_CRIT_GUIDE = {
   K8: { name: "пунктуация", why: "запятые в сложных предложениях и при обособлениях", next: "подчеркни все грамматические основы — каждая граница требует решения о запятой" },
   K9: { name: "грамматика", why: "несогласования и неверные формы слов", next: "проверь каждое длинное предложение: подлежащее, сказуемое и их согласование" },
   K10: { name: "речевые нормы", why: "повторы слов и штампы вместо точных формулировок", next: "выпиши слова, которые повторяются чаще двух раз, и замени синонимами" },
+  /* Рубрика ОГЭ (задание 13): те же подсказки, но по критериям И1–И3 и
+     ГК1–ГК4. Без них ОГЭ-экран показывал бы «самое слабое место — I1»
+     без объяснения, что с ним делать. */
+  I1: { name: "содержание и аргументация", why: "ответ на вопрос темы не сформулирован или аргументов меньше двух (один по тексту, один из опыта)", next: "начни с прямого ответа на вопрос темы одним предложением и подбери к нему два аргумента разного вида" },
+  I2: { name: "пояснения к аргументам", why: "аргументы названы, но не показано, как каждый подтверждает ответ", next: "после каждого аргумента добавь фразу «этот пример доказывает, что…» и свяжи её с вопросом темы" },
+  I3: { name: "композиция и логика", why: "части работы перепутаны или пропущен вывод", next: "собери работу по плану: тезис — аргумент по тексту — аргумент из опыта — вывод" },
+  GK1: { name: "орфография", why: "описки и безударные, которые глаз уже не замечает", next: "перечитай работу медленно, по словам, от конца к началу" },
+  GK2: { name: "пунктуация", why: "запятые в сложных предложениях и при обособлениях", next: "подчеркни все грамматические основы — каждая граница требует решения о запятой" },
+  GK3: { name: "грамматика", why: "несогласования и неверные формы слов", next: "проверь каждое длинное предложение: подлежащее, сказуемое и их согласование" },
+  GK4: { name: "речевые нормы", why: "повторы слов и штампы вместо точных формулировок", next: "выпиши слова, которые повторяются чаще двух раз, и замени синонимами" },
 };
 const ESSAY_CRIT_ORDER = ["K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8", "K9", "K10"];
+const ESSAY_CRIT_ORDER_OGE = ["I1", "I2", "I3", "GK1", "GK2", "GK3", "GK4"];
+
+function essayCritOrderIndex(id) {
+  const ege = ESSAY_CRIT_ORDER.indexOf(id);
+  return ege >= 0 ? ege : (ESSAY_CRIT_ORDER_OGE.indexOf(id) >= 0 ? ESSAY_CRIT_ORDER_OGE.indexOf(id) : 99);
+}
 const ESSAY_STEADY_PCT = 75;
 
 function essayCritStats(ready) {
@@ -11244,11 +11301,12 @@ function essayCritStats(ready) {
     id, n: cur.n, max: cur.max,
     avg: Math.round((cur.sum / cur.n) * 10) / 10,
     pct: Math.max(0, Math.min(100, (cur.sum / cur.n / cur.max) * 100)),
-  })).sort((a, b) => (a.pct - b.pct) || (ESSAY_CRIT_ORDER.indexOf(a.id) - ESSAY_CRIT_ORDER.indexOf(b.id)));
+  })).sort((a, b) => (a.pct - b.pct) || (essayCritOrderIndex(a.id) - essayCritOrderIndex(b.id)));
 }
 
 function essayInsightHTML(snap, readyNewFirst) {
   const ready = readyNewFirst.slice().reverse();
+  const maxScore = essayMaxScore(snap);
   const last = readyNewFirst[0] || null;
   const lastSid = last && Number.isFinite(Number(last.submissionId)) ? Number(last.submissionId) : 0;
   const lastRef = (last && last.publicId) || lastSid || "";
@@ -11276,17 +11334,17 @@ function essayInsightHTML(snap, readyNewFirst) {
   const lo = Math.min(...scores), hi = Math.max(...scores);
   let trend;
   if (n < 2) {
-    trend = `Первая проверенная работа — <b class="mono">${first} из 22</b>. Это точка отсчёта: со второй появится линия роста.`;
+    trend = `Первая проверенная работа — <b class="mono">${first} из ${maxScore}</b>. Это точка отсчёта: со второй появится линия роста.`;
   } else if (d > 0) {
-    trend = `Рост: от <b class="mono">${first}</b> до <b class="mono">${lastScore} из 22</b> за ${n} ${workWord} (<b class="mono">+${d}</b>). То, что меняется, — работает: продолжай в том же темпе.`;
-    if (lo < first) trend += ` По пути была просадка до <b class="mono">${lo} из 22</b> — это нормально, важен тренд.`;
+    trend = `Рост: от <b class="mono">${first}</b> до <b class="mono">${lastScore} из ${maxScore}</b> за ${n} ${workWord} (<b class="mono">+${d}</b>). То, что меняется, — работает: продолжай в том же темпе.`;
+    if (lo < first) trend += ` По пути была просадка до <b class="mono">${lo} из ${maxScore}</b> — это нормально, важен тренд.`;
   } else if (d < 0) {
-    trend = `Сейчас спад: от <b class="mono">${first}</b> до <b class="mono">${lastScore} из 22</b> за ${n} ${workWord} (<b class="mono">${d}</b>). Результаты от работы к работе гуляют — это нормально. Разбери последний разбор и напиши следующее: одно слабое место за раз.`;
-    if (hi > first) trend += ` Лучшее на этом отрезке — <b class="mono">${hi} из 22</b>: к нему и возвращаемся.`;
+    trend = `Сейчас спад: от <b class="mono">${first}</b> до <b class="mono">${lastScore} из ${maxScore}</b> за ${n} ${workWord} (<b class="mono">${d}</b>). Результаты от работы к работе гуляют — это нормально. Разбери последний разбор и напиши следующее: одно слабое место за раз.`;
+    if (hi > first) trend += ` Лучшее на этом отрезке — <b class="mono">${hi} из ${maxScore}</b>: к нему и возвращаемся.`;
   } else if (hi !== lo) {
-    trend = `Первая и последняя — по <b class="mono">${first} из 22</b>, а в середине было от <b class="mono">${lo}</b> до <b class="mono">${hi}</b>. Результат пока гуляет — это нормально: разбери просадки и закрепи то, что уже получается.`;
+    trend = `Первая и последняя — по <b class="mono">${first} из ${maxScore}</b>, а в середине было от <b class="mono">${lo}</b> до <b class="mono">${hi}</b>. Результат пока гуляет — это нормально: разбери просадки и закрепи то, что уже получается.`;
   } else {
-    trend = `Все ${n} ${workWord} — по <b class="mono">${first} из 22</b>. Стабильность — уже результат; пойти выше поможет одно слабое место ниже.`;
+    trend = `Все ${n} ${workWord} — по <b class="mono">${first} из ${maxScore}</b>. Стабильность — уже результат; пойти выше поможет одно слабое место ниже.`;
   }
   const crits = essayCritStats(ready);
   let focus = "";
@@ -11318,11 +11376,12 @@ function essayStatusChip(status) {
   return `<span class="chip">без проверки</span>`;
 }
 
-function essayItemHTML(it, num) {
+function essayItemHTML(it, num, maxScore) {
   const sid = Number(it.submissionId);
   const score = Number(it.totalScore);
+  const top = Number(it.maxScore) > 0 ? Number(it.maxScore) : (Number(maxScore) > 0 ? Number(maxScore) : 22);
   const hasScore = it.status === "ready" && Number.isFinite(score);
-  const band = essayScoreBand(hasScore ? score : NaN);
+  const band = essayScoreBand(hasScore ? score : NaN, top);
   const date = essayFmtDate(it.createdAt);
   const sub = [date, it.wordCount ? `${it.wordCount} ${essayWordsLabel(it.wordCount)}` : ""].filter(Boolean).join(" · ");
   const verdict = String(it.verdict || "").trim();
@@ -11330,7 +11389,7 @@ function essayItemHTML(it, num) {
   <article class="card essay-item">
     <div class="essay-item__head">
       <div class="essay-item__score essay-item__score--${band}">
-        <span class="essay-item__num mono">${hasScore ? score : "–"}</span><span class="essay-item__den">/ 22</span>
+        <span class="essay-item__num mono">${hasScore ? score : "–"}</span><span class="essay-item__den">/ ${top}</span>
       </div>
       <div class="essay-item__main">
         <div class="essay-item__title">Сочинение №${num} · ${esc(essayItemTitle(it))}</div>

@@ -182,7 +182,9 @@ def main():
             if callable(entry.get("chat")):
                 entry["chat"] = judge_fn
             if callable(entry.get("grammar")):
-                entry["grammar"] = lambda text, source_text="": []
+                # Рубрика (ege/oge) приходит в детерминированную грамотность
+                # обязательным аргументом: заглушка обязана её принимать.
+                entry["grammar"] = lambda text, source_text="", rubric="": []
         ai.reset_ai_rate()
 
         httpd = server.create_http_server("127.0.0.1", 0)
